@@ -20,7 +20,7 @@ use constant {
 };
 
 my %opts;
-getopts('H:p:q:w:c:?hv', \%opts);
+getopts('P:H:p:q:w:c:?hv', \%opts);
 
 usage() if ( exists $opts{h} || exists $opts{'?'}
     || !exists $opts{H}) || !exists $opts{q};
@@ -31,12 +31,15 @@ my $VERBOSE = exists $opts{v};
 $opts{p} ||= '6379';
 $opts{w} ||= '100';
 $opts{c} ||= '500';
+$opts{P} ||= '';
+
 for (qw(p w c)) {
     if ($opts{$_} =~ m/^[^0-9]+$/) {
         warn "Invalid value for option $_\n";
         exit UNKNOWN;
     }
 }
+
 
 if ($opts{w} > $opts{c}) {
     warn "warn level ($opts{w}) should be lower than"
@@ -45,8 +48,10 @@ if ($opts{w} > $opts{c}) {
 }
 
 my $service = "$opts{H}:$opts{p}";
+my $password = $opts{P};
 
 my $conn = Redis->new( server => $service, reconnect => 3);
+$conn->auth($password) if $password;
     
 if (!$conn) {
     warn "can't connect to $service\n";
@@ -57,22 +62,26 @@ my $len = $conn->llen($opts{q});
 
 print "$opts{q} has length $len\n" if $VERBOSE;
 
+my $ev = OK;
 if ($len < $opts{w}) {
-    print "$len is OK\n" if $VERBOSE;
-    exit OK;
+    print "$opts{q} length $len is OK";
 }
 elsif ($len < $opts{c}) {
-    printf "%s: queue length of %s is %d (threshold: %d)\n",
+    printf "%s: queue length of %s is %d (threshold: %d)",
         'Warning', $opts{q}, $len, $opts{w};
-    exit WARNING;
+    $ev = WARNING;
 }
 else {
-    printf "%s: queue length of %s is %d (threshold: %d)\n",
+    printf "%s: queue length of %s is %d (threshold: %d)",
         'Critical', $opts{q}, $len, $opts{c};
-    exit CRITICAL;
+    $ev = CRITICAL;
 }
 
+#perfdata!
+printf " | %s=%d;%d;%d;\n", $opts{q}, $len, $opts{w}, $opts{c};
+exit $ev;
+
 sub usage {
-    print "usage $0 -H host -q queue_name [-p port] [-w len] [-c len] [-v]\n";
+    print "usage $0 -H host -q queue_name [-P password] [-p port] [-w len] [-c len] [-v]\n";
     exit;
 }
